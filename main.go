@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"github.com/satori/go.uuid"
 	"github.com/jinzhu/gorm"
-	"github.com/jinzhu/gorm/dialects/sqlite"
+	_ "github.com/jinzhu/gorm/dialects/sqlite"
+	"fmt"
 )
 
 type ToDoServer struct {
@@ -13,31 +14,32 @@ type ToDoServer struct {
 }
 
 type ToDoList struct {
-	Items map[uuid.UUID]ToDoItem `json:"items"`
+	Items []ToDoItem `json:"items"`
 }
 
 type ToDoItem struct {
+
+	ID 			uint `json:"id",gorm:"auto_increment"`
 	IsDone      bool `json:"done"`
 	Description string `json:"description"`
 }
 
 func newTodoList() ToDoList {
 	Todolist := ToDoList{}
-	Todolist.Items = make(map[uuid.UUID]ToDoItem)
+
 	return Todolist
 }
 
 func (Todolist *ToDoList) AddItem(Todoitem ToDoItem) {
-	Todolist.Items[uuid.NewV4()] = Todoitem
-	// Todolist.Items = append(Todolist.Items, Todoitem)
+
 }
 
-func (Todolist *ToDoList) GetItems() map[uuid.UUID]ToDoItem {
+func (Todolist *ToDoList) GetItems() []ToDoItem {
 	return Todolist.Items
 }
 
 func (Todolist *ToDoList) DeleteItem(key uuid.UUID) {
-	delete(Todolist.Items, key)
+	// delete(Todolist.Items, key)
 }
 
 func (Todoserver *ToDoServer) GetList() ToDoList {
@@ -48,7 +50,7 @@ func (Todoserver *ToDoServer) addServerItem(Item ToDoItem) {
 	Todoserver.TodoList.AddItem(Item)
 }
 
-func (Todoserver *ToDoServer) GetServerItems() map[uuid.UUID]ToDoItem {
+func (Todoserver *ToDoServer) GetServerItems() []ToDoItem {
 	return Todoserver.TodoList.GetItems()
 }
 
@@ -79,10 +81,13 @@ func main() {
 	if err != nil {
 		panic("Can't connect to database")
 	}
-	db.AutoMigrate(&ToDoServer{})
-	db.CreateTable(&ToDoServer{})
-	db.Set("gorm:table_options", "ENGINE=InnoDB").CreateTable(&ToDoServer{})
+	db.AutoMigrate(&ToDoItem{})
 	defer db.Close()
+
+	// db.Create(&ToDoItem{IsDone:false, Description:"buying pizza"})
+
+	db.DropTable(ToDoItem{})
+
 	todolist := newTodoList()
 	Todoserver := ToDoServer{todolist}
 	e := echo.New()
