@@ -2,97 +2,75 @@ package main
 
 import (
 	"github.com/labstack/echo"
-	"net/http"
-	"github.com/satori/go.uuid"
+
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	"fmt"
+	"net/http"
+	"strconv"
 )
 
 type ToDoServer struct {
-	TodoList ToDoList `json:"server"`
+	db *gorm.DB
 }
 
-type ToDoList struct {
-	Items []ToDoItem `json:"items"`
+func NewToDoServer(db *gorm.DB) *ToDoServer {
+	return &ToDoServer{db:db}
 }
 
 type ToDoItem struct {
-
 	ID 			uint `json:"id",gorm:"auto_increment"`
 	IsDone      bool `json:"done"`
 	Description string `json:"description"`
 }
 
-func newTodoList() ToDoList {
-	Todolist := ToDoList{}
 
-	return Todolist
+func (Todoserver *ToDoServer) GetDatabase() *gorm.DB {
+	return Todoserver.db
 }
 
-func (Todolist *ToDoList) AddItem(Todoitem ToDoItem) {
-
+func (Todoserver *ToDoServer) handler (c echo.Context) error {
+	var dat []ToDoItem
+	Todoserver.db.Find(&dat)
+	return c.JSON(http.StatusOK, dat)
 }
 
-func (Todolist *ToDoList) GetItems() []ToDoItem {
-	return Todolist.Items
+func (Todoserver *ToDoServer) postHandler (c echo.Context) error {
+	todo := ToDoItem{}
+	c.Bind(&todo)
+	Todoserver.db.Create(&todo)
+	var dat []ToDoItem
+	Todoserver.db.Find(&dat)
+	return c.JSON(http.StatusOK, dat)
 }
 
-func (Todolist *ToDoList) DeleteItem(key uuid.UUID) {
-	// delete(Todolist.Items, key)
-}
-
-func (Todoserver *ToDoServer) GetList() ToDoList {
-	return Todoserver.TodoList
-}
-
-func (Todoserver *ToDoServer) addServerItem(Item ToDoItem) {
-	Todoserver.TodoList.AddItem(Item)
-}
-
-func (Todoserver *ToDoServer) GetServerItems() []ToDoItem {
-	return Todoserver.TodoList.GetItems()
-}
-
-func (Todoserver *ToDoServer) handler(c echo.Context) error {
-	return c.JSON(http.StatusOK, Todoserver.GetServerItems())
-}
-
-func (Todoserver *ToDoServer) postHandler(c echo.Context) error {
-	item := ToDoItem{}
-	c.Bind(&item)
-	Todoserver.TodoList.AddItem(item)
-	return c.JSON(http.StatusOK, Todoserver)
-}
-
-func (Todoserver *ToDoServer) deleteServerItem(key uuid.UUID) {
-	Todoserver.TodoList.DeleteItem(key)
-}
-
-func (Todoserver *ToDoServer) deleteHandler(c echo.Context) error {
+func (Todoserver *ToDoServer) deleteHandler (c echo.Context) error {
 	id := c.Param("id")
-	key, _ := uuid.FromString(id)
-	Todoserver.deleteServerItem(key)
-	return c.JSON(http.StatusOK, Todoserver)
+	key, _ := strconv.Atoi(id)
+	Todoserver.db.Delete(ToDoItem{}, "id = ?", key)
+	var dat []ToDoItem
+	Todoserver.db.Find(&dat)
+	return c.JSON(http.StatusOK, dat)
 }
 
 func main() {
-	db, err := gorm.Open("sqlite3", "/tmp/gorm.db")
+	database, err := gorm.Open("sqlite3", "/tmp/gorm.db")
 	if err != nil {
 		panic("Can't connect to database")
 	}
-	db.AutoMigrate(&ToDoItem{})
-	defer db.Close()
+	database.AutoMigrate(&ToDoItem{})
+	defer database.Close()
 
-	// db.Create(&ToDoItem{IsDone:false, Description:"buying pizza"})
+	todoserver := NewToDoServer(database)
 
-	db.DropTable(ToDoItem{})
+	var res []ToDoItem
+	todoserver.db.Find(&res)
+	fmt.Println(res)
+	// todoserver.db.DropTable(ToDoItem{})
 
-	todolist := newTodoList()
-	Todoserver := ToDoServer{todolist}
 	e := echo.New()
-	e.GET("/", Todoserver.handler)
-	e.DELETE("/:id", Todoserver.deleteHandler)
-	e.POST("/", Todoserver.postHandler)
+	e.GET("/", todoserver.handler)
+	e.DELETE("/:id", todoserver.deleteHandler)
+	e.POST("/", todoserver.postHandler)
 	e.Logger.Fatal(e.Start(":8080"))
 }
