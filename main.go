@@ -2,10 +2,8 @@ package main
 
 import (
 	"github.com/labstack/echo"
-
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
-	"fmt"
 	"net/http"
 	"strconv"
 	"github.com/labstack/echo/middleware"
@@ -23,6 +21,11 @@ type ToDoItem struct {
 	ID 			uint `json:"id",gorm:"auto_increment"`
 	IsDone      bool `json:"done"`
 	Description string `json:"description"`
+}
+
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 
@@ -54,8 +57,11 @@ func (Todoserver *ToDoServer) deleteHandler (c echo.Context) error {
 	return c.JSON(http.StatusOK, dat)
 }
 
-func test(c echo.Context) error {
-	return c.String(http.StatusOK, "admin page")
+func (Todoserver *ToDoServer) registerHandler (c echo.Context) error {
+	user := User{}
+	c.Bind(&user)
+	Todoserver.db.Create(&user)
+	return c.JSON(http.StatusOK, user)
 }
 
 func main() {
@@ -64,29 +70,27 @@ func main() {
 		panic("Can't connect to database")
 	}
 	database.AutoMigrate(&ToDoItem{})
+	database.AutoMigrate(&User{})
 	defer database.Close()
 
 	todoserver := NewToDoServer(database)
-
-	var res []ToDoItem
-	todoserver.db.Find(&res)
-	fmt.Println(res)
 	// todoserver.db.DropTable(ToDoItem{})
-
+	// todoserver.db.DropTable(User{})
 	e := echo.New()
 	admin := e.Group("/admin")
 
 	admin.Use(middleware.BasicAuth(func(username, password string, c echo.Context) (bool, error) {
-		if username == "admin" && password == "admin" {
-			return true, nil
+		var dbUser User
+		if err := todoserver.db.Where("username = ? AND password = ?", username, password).First(&dbUser).Error; err != nil {
+			return false, nil
 		}
-		return false, nil
+		return true, nil
 	}))
 
-	admin.GET("/test", test)
 	admin.GET("/", todoserver.handler)
 	admin.DELETE("/:id", todoserver.deleteHandler)
 	admin.POST("/", todoserver.postHandler)
+	e.POST("/register", todoserver.registerHandler)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
