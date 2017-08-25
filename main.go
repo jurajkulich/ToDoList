@@ -12,7 +12,6 @@ import (
 	"golang.org/x/crypto/scrypt"
 	"bytes"
 	"time"
-
 )
 
 const (
@@ -30,8 +29,9 @@ func NewToDoServer(db *gorm.DB) *ToDoServer {
 
 type ToDoItem struct {
 	gorm.Model
-	IsDone      bool `json:"done"`
+	Name string	`json:"name"`
 	Description string `json:"description"`
+	IsDone      bool `json:"done"`
 	UserID uint
 }
 
@@ -66,6 +66,9 @@ func (Todoserver *ToDoServer) handler (c echo.Context) error {
 func (Todoserver *ToDoServer) postHandler (c echo.Context) error {
 	todo := ToDoItem{}
 	c.Bind(&todo)
+	if todo.Name == "" {
+		return c.JSON(http.StatusBadRequest, "Bad input. You have to add \"name\"")
+	}
 	user := &User{}
 	userName := c.Get("context")
 	err := Todoserver.db.First(user, "username = ?", userName).Error
@@ -90,7 +93,9 @@ func (Todoserver *ToDoServer) deleteHandler (c echo.Context) error {
 	}
 	todo.UserID = user.ID
 
-	Todoserver.db.Delete(&todo, "id = ?", key)
+	if Todoserver.db.Delete(&todo, "id = ?", key).RecordNotFound() {
+		return c.JSON(http.StatusBadRequest, "No item found")
+	}
 	return c.JSON(http.StatusOK, "Deleted")
 }
 
@@ -99,6 +104,9 @@ func (Todoserver *ToDoServer) registerHandler (c echo.Context) error {
 	// Get data from POST
 	user := User{}
 	c.Bind(&user)
+	if user.Username == ""  {
+		return c.JSON(http.StatusBadRequest, errors.New("Bad input!").Error())
+	}
 
 	if Todoserver.db.Where("username = ?", user.Username).First(&User{}).RecordNotFound() {
 		key, _ := scrypt.Key([]byte(user.Password), []byte(PSWDKey), 16384, 8, 1, 32)
@@ -123,7 +131,7 @@ func (Todoserver ToDoServer) loginHandler(c echo.Context) error {
 	}
 	if bytes.Compare(key, dbUser.Password) == 0 {
 		t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"exp": time.Now().Add(time.Minute * 20).Unix(),
+			"exp": time.Now().Add(time.Minute * 60).Unix(),
 			"username": dbUser.Username,
 		})
 
@@ -135,6 +143,36 @@ func (Todoserver ToDoServer) loginHandler(c echo.Context) error {
 	} else {
 		return c.JSON(http.StatusBadRequest, errors.New("Bad password!").Error())
 	}
+}
+
+func (Todoserver *ToDoServer) updateHandler(c echo.Context) error {
+	userName := c.Get("context")
+	id := c.Param("id")
+	todo := ToDoItem{}
+	c.Bind(&todo)
+	user := User{}
+	err := Todoserver.db.First(&user, "username = ?", userName).Error
+	if err != nil {
+		return c.JSON(http.StatusNoContent, err)
+	}
+
+	todo.UserID = user.ID
+	key, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusNoContent, err)
+	}
+	todo.ID = uint(key)
+	oldTodo := &ToDoItem{}
+	err = Todoserver.db.First(oldTodo, "id = ?", id ).Error
+	if err != nil {
+		return c.JSON(http.StatusNoContent, err)
+	}
+
+	err = Todoserver.db.Save(&todo).Error
+	if err != nil {
+		return c.JSON(http.StatusNoContent, err)
+	}
+	return c.JSON(http.StatusOK, oldTodo)
 }
 
 func (Todoserver *ToDoServer) TokenToStruct(next echo.HandlerFunc) echo.HandlerFunc {
@@ -161,9 +199,7 @@ func (Todoserver *ToDoServer) TokenToStruct(next echo.HandlerFunc) echo.HandlerF
 			fmt.Printf("Bad token")
 			return c.NoContent(http.StatusUnauthorized)
 		}
-
 	}
-
 }
 
 func main() {
@@ -172,16 +208,16 @@ func main() {
 		panic("Can't connect to database")
 	}
 
-	// todoserver.db.DropTable(ToDoItem{})
-	// todoserver.db.DropTable(User{})
-	// todoserver.db.DropTable(NameToken{})
-
 	database.AutoMigrate(&ToDoItem{})
 	database.AutoMigrate(&User{})
 	database.AutoMigrate(&NameToken{})
 	defer database.Close()
 
 	todoserver := NewToDoServer(database)
+
+	// todoserver.db.DropTable(ToDoItem{})
+	// todoserver.db.DropTable(User{})
+	// todoserver.db.DropTable(NameToken{})
 
 	e := echo.New()
 	admin := e.Group("/admin")
@@ -193,7 +229,7 @@ func main() {
 	admin.GET("/", todoserver.handler)
 	admin.DELETE("/:id", todoserver.deleteHandler)
 	admin.POST("/", todoserver.postHandler)
-
+	admin.POST("/:id", todoserver.updateHandler)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
